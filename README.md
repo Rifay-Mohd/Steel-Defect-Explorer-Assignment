@@ -33,7 +33,7 @@ X_Minimum, X_Maximum, Y_Minimum, Y_Maximum, Pixels_Areas, X_Perimeter, Y_Perimet
 
 ## c. GitHub repository link
 
-**Not published yet.** The confirmed owner is `Rifay-Mohd`, and the planned repository is [Rifay-Mohd/Steel-Defect-Explorer-Assignment](https://github.com/Rifay-Mohd/Steel-Defect-Explorer-Assignment). The repository has not been created; this is a planned URL, not a verified live link. Remote publication and deployment verification are pending.
+**Public repository:** [Rifay-Mohd/Steel-Defect-Explorer-Assignment](https://github.com/Rifay-Mohd/Steel-Defect-Explorer-Assignment). The published source is on the default branch, [`develop`](https://github.com/Rifay-Mohd/Steel-Defect-Explorer-Assignment/tree/develop). Repository visibility, branch availability, and required published files have been verified. Streamlit Community Cloud deployment is pending; no live app URL is available yet.
 
 ## d. Models used
 
@@ -174,4 +174,4 @@ The experiment records **31 `FutureWarning` occurrences** from SVM fitting under
 
 ## Local status
 
-The local experiment is complete, all five pipelines and recorded outputs are present, and the 69-test suite passes from the current project folder. Local browser upload, evaluation, and five-model comparison were tested in a previous session; retained screenshots are [evaluation](results/figures/local_app_evaluation.png) and [comparison](results/figures/local_app_comparison.png). That browser check predates the project folder move; browser verification from the current folder remains pending. GitHub publication and remote deployment remain pending.
+The local experiment is complete, all five pipelines and recorded outputs are present, and the 69-test suite passes from the current project folder. Local browser upload, evaluation, and five-model comparison were tested in a previous session; retained screenshots are [evaluation](results/figures/local_app_evaluation.png) and [comparison](results/figures/local_app_comparison.png). That browser check predates the project folder move; browser verification from the current folder remains pending. The public GitHub repository and required files on `develop` have been verified. Remote deployment, BITS Virtual Lab execution evidence, and the final submission PDF remain pending.
