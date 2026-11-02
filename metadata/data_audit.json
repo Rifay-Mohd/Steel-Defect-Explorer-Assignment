@@ -1,0 +1,78 @@
+{
+  "all_values_finite": true,
+  "binary_targets": true,
+  "class_counts": {
+    "Bumps": 402,
+    "Dirtiness": 55,
+    "K_Scatch": 391,
+    "Other_Faults": 673,
+    "Pastry": 158,
+    "Stains": 72,
+    "Z_Scratch": 190
+  },
+  "classes": [
+    "Bumps",
+    "Dirtiness",
+    "K_Scatch",
+    "Other_Faults",
+    "Pastry",
+    "Stains",
+    "Z_Scratch"
+  ],
+  "conflicting_label_rows": 0,
+  "conflicting_source_row_ids": [],
+  "disposition": "row-level split permitted",
+  "exact_duplicate_rows": 0,
+  "exact_duplicate_source_row_ids": [],
+  "feature_count": 27,
+  "features": [
+    "X_Minimum",
+    "X_Maximum",
+    "Y_Minimum",
+    "Y_Maximum",
+    "Pixels_Areas",
+    "X_Perimeter",
+    "Y_Perimeter",
+    "Sum_of_Luminosity",
+    "Minimum_of_Luminosity",
+    "Maximum_of_Luminosity",
+    "Length_of_Conveyer",
+    "TypeOfSteel_A300",
+    "TypeOfSteel_A400",
+    "Steel_Plate_Thickness",
+    "Edges_Index",
+    "Empty_Index",
+    "Square_Index",
+    "Outside_X_Index",
+    "Edges_X_Index",
+    "Edges_Y_Index",
+    "Outside_Global_Index",
+    "LogOfAreas",
+    "Log_X_Index",
+    "Log_Y_Index",
+    "Orientation_Index",
+    "Luminosity_Index",
+    "SigmoidOfAreas"
+  ],
+  "identical_feature_rows": 0,
+  "missing_values": 0,
+  "one_active_target_per_row": true,
+  "source_row_id_convention": "zero-based row index in original Faults.NNA",
+  "source_sha256": {
+    "Faults.NNA": "08994f5b0185a8e6cc22afe9910fd36834990fb1ca30852ed79012a832fbff55",
+    "Faults27x7_var": "887dbfa140b48877b706865ef277550dc0203699243c600e24bfe8b090a9a953"
+  },
+  "source_shape": [
+    1941,
+    34
+  ],
+  "source_target_order": [
+    "Pastry",
+    "Z_Scratch",
+    "K_Scatch",
+    "Stains",
+    "Dirtiness",
+    "Bumps",
+    "Other_Faults"
+  ]
+}

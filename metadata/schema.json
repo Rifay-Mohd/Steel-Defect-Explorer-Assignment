@@ -1,0 +1,76 @@
+{
+  "classes": [
+    "Bumps",
+    "Dirtiness",
+    "K_Scatch",
+    "Other_Faults",
+    "Pastry",
+    "Stains",
+    "Z_Scratch"
+  ],
+  "features": [
+    "X_Minimum",
+    "X_Maximum",
+    "Y_Minimum",
+    "Y_Maximum",
+    "Pixels_Areas",
+    "X_Perimeter",
+    "Y_Perimeter",
+    "Sum_of_Luminosity",
+    "Minimum_of_Luminosity",
+    "Maximum_of_Luminosity",
+    "Length_of_Conveyer",
+    "TypeOfSteel_A300",
+    "TypeOfSteel_A400",
+    "Steel_Plate_Thickness",
+    "Edges_Index",
+    "Empty_Index",
+    "Square_Index",
+    "Outside_X_Index",
+    "Edges_X_Index",
+    "Edges_Y_Index",
+    "Outside_Global_Index",
+    "LogOfAreas",
+    "Log_X_Index",
+    "Log_Y_Index",
+    "Orientation_Index",
+    "Luminosity_Index",
+    "SigmoidOfAreas"
+  ],
+  "input_policy": {
+    "finite": true,
+    "missing_values_allowed": false,
+    "numeric": true
+  },
+  "schema_version": 1,
+  "source": {
+    "doi": "10.24432/C5J88N",
+    "download_url": "https://archive.ics.uci.edu/static/public/198/steel+plates+faults.zip",
+    "license": "CC BY 4.0",
+    "page": "https://archive.ics.uci.edu/dataset/198/steel+plates+faults",
+    "representation": "Faults.NNA with Faults27x7_var column order",
+    "sha256": {
+      "Faults.NNA": "08994f5b0185a8e6cc22afe9910fd36834990fb1ca30852ed79012a832fbff55",
+      "Faults27x7_var": "887dbfa140b48877b706865ef277550dc0203699243c600e24bfe8b090a9a953"
+    }
+  },
+  "source_target_order": [
+    "Pastry",
+    "Z_Scratch",
+    "K_Scatch",
+    "Stains",
+    "Dirtiness",
+    "Bumps",
+    "Other_Faults"
+  ],
+  "source_to_display": {
+    "Bumps": "Bumps",
+    "Dirtiness": "Dirtiness",
+    "K_Scatch": "K Scatch",
+    "Other_Faults": "Other Faults",
+    "Pastry": "Pastry",
+    "Stains": "Stains",
+    "Z_Scratch": "Z Scratch"
+  },
+  "target": "fault_type"
+}

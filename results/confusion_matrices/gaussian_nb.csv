@@ -1,0 +1,8 @@
+true_label,Bumps,Dirtiness,K_Scatch,Other_Faults,Pastry,Stains,Z_Scratch
+Bumps,61,5,0,6,8,1,0
+Dirtiness,0,9,0,0,2,0,0
+K_Scatch,1,0,70,6,1,0,0
+Other_Faults,47,10,10,36,27,1,4
+Pastry,7,5,0,0,20,0,0
+Stains,2,0,0,0,0,12,0
+Z_Scratch,3,0,2,1,1,0,31

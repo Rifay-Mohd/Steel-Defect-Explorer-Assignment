@@ -1,0 +1,15 @@
+# Keep native upload controls, tables, and dropdowns aligned with the dashboard.
+[theme]
+base = "light"
+primaryColor = "#147d80"
+backgroundColor = "#f5f2e9"
+secondaryBackgroundColor = "#e9eee9"
+textColor = "#172b42"
+font = "sans serif"
+
+# Uploaded labeled test data is bounded again by the application's validator.
+[server]
+maxUploadSize = 5
+
+[browser]
+gatherUsageStats = false
