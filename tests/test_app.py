@@ -105,7 +105,9 @@ def test_valid_upload_model_selection_comparison_and_invalid_replacement(
     assert len(comparison) == 1
     assert comparison[0].index.tolist() == list(MODEL_NAMES.values())
     cached = dict(app.session_state["results"])
-    app.selectbox(key="comparison_metric").select("AUC").run()
+    # The single combined chart replaced the per-metric dropdown.
+    assert not [box for box in app.selectbox if box.key == "comparison_metric"]
+    app.selectbox(key="model_select").select("svm").run()
     assert_healthy(app)
     for key, result in cached.items():
         assert app.session_state["results"][key] is result
@@ -545,6 +547,79 @@ def test_best_cell_styles_pick_column_maximum_and_ignore_nan():
     rendered = app_module.comparison_styler(frame).to_html()
     assert "N/A" in rendered
     assert "font-weight: 700" in rendered
+
+
+def _bars_by_metric(fig):
+    """Group the visible bars of a comparison figure by their legend metric label."""
+    ax = fig.axes[0]
+    groups = {}
+    for container in ax.containers:
+        groups[container.get_label()] = [
+            (patch.get_height(), patch.get_facecolor(), patch.get_visible())
+            for patch in container.patches
+        ]
+    return groups
+
+
+def test_combined_chart_has_every_metric_for_every_model_in_its_own_colour():
+    """One figure holds 6 metrics x 5 models; each metric keeps one distinct colour."""
+    import app as app_module
+    from matplotlib.colors import to_rgba
+
+    plt.switch_backend("Agg")
+    names = list(MODEL_NAMES.values())
+    frame = pd.DataFrame(
+        {
+            metric: np.linspace(0.40 + 0.05 * i, 0.90, len(names))
+            for i, metric in enumerate(app_module.METRICS)
+        },
+        index=names,
+    )
+    # A negative MCC must draw below zero, not be clipped or hidden.
+    frame.loc[names[0], "MCC"] = -0.30
+    fig = app_module.metric_comparison_figure(frame)
+    try:
+        groups = _bars_by_metric(fig)
+        assert list(groups) == list(app_module.METRICS)
+        colours = []
+        for metric, bars in groups.items():
+            assert len(bars) == len(names)
+            assert all(visible for _, _, visible in bars)
+            # Heights equal the supplied scores exactly, in model order.
+            assert [h for h, _, _ in bars] == pytest.approx(frame[metric].tolist())
+            assert {c for _, c, _ in bars} == {
+                to_rgba(app_module.METRIC_ACCENTS[metric])
+            }
+            colours.append(to_rgba(app_module.METRIC_ACCENTS[metric]))
+        assert len(set(colours)) == len(app_module.METRICS)
+        assert groups["MCC"][0][0] < 0
+        # The legend names all six metrics so colour is never the only identifier.
+        legend = fig.axes[0].get_legend()
+        assert [t.get_text() for t in legend.get_texts()] == list(app_module.METRICS)
+    finally:
+        plt.close(fig)
+
+
+def test_combined_chart_leaves_a_gap_for_unavailable_auc():
+    """A missing AUC draws no bar and no label, instead of a misleading zero score."""
+    import app as app_module
+
+    plt.switch_backend("Agg")
+    names = list(MODEL_NAMES.values())
+    frame = pd.DataFrame(
+        {metric: [0.6] * len(names) for metric in app_module.METRICS}, index=names
+    )
+    frame["AUC"] = np.nan
+    fig = app_module.metric_comparison_figure(frame)
+    try:
+        groups = _bars_by_metric(fig)
+        assert not any(visible for _, _, visible in groups["AUC"])
+        assert all(visible for _, _, visible in groups["F1"])
+        # Five models x five available metrics get a value label; AUC gets none.
+        labels = [t.get_text() for t in fig.axes[0].texts]
+        assert len(labels) == len(names) * (len(app_module.METRICS) - 1)
+    finally:
+        plt.close(fig)
 
 
 def test_result_card_colour_follows_prediction_not_top_probability(

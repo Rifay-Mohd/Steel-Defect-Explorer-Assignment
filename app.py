@@ -244,7 +244,6 @@ def reset_upload_state() -> None:
         "results",
         "comparison_identity",
         "confusion_mode",
-        "comparison_metric",
         "distribution_feature",
         "scatter_x",
         "scatter_y",
@@ -538,6 +537,65 @@ def render_evaluate(batch: ValidatedBatch, model_id: str, resources: dict) -> No
         )
 
 
+# One grouped chart: models on the x-axis, one pastel bar per metric within each group.
+def metric_comparison_figure(frame: pd.DataFrame):
+    """Draw all six metrics for every model in a single grouped bar chart.
+
+    ``frame`` is indexed by model display name with one column per metric. Metric colors
+    come from METRIC_ACCENTS only to identify a metric, never to rate it. An unavailable
+    (NaN) value leaves a gap rather than a zero-height bar, so a missing AUC is never
+    mistaken for a score of zero.
+    """
+    metrics = list(METRICS)
+    group_width = 0.84
+    bar_width = group_width / len(metrics)
+    fig, ax = new_chart((12, 5.4))
+    for position, metric in enumerate(metrics):
+        # Center the group of bars on each model's tick.
+        offsets = np.arange(len(frame)) - group_width / 2 + bar_width * (position + 0.5)
+        values = frame[metric].to_numpy(dtype=float)
+        bars = ax.bar(
+            offsets,
+            np.nan_to_num(values, nan=0.0),
+            width=bar_width,
+            color=METRIC_ACCENTS[metric],
+            edgecolor=NAVY,
+            linewidth=0.6,
+            label=metric,
+        )
+        for bar, value in zip(bars, values):
+            if np.isnan(value):
+                bar.set_visible(False)
+                continue
+            # MCC can be negative: place its label on the outer side of the bar.
+            ax.annotate(
+                f"{value:.3f}",
+                (bar.get_x() + bar.get_width() / 2, value),
+                xytext=(0, 3 if value >= 0 else -3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom" if value >= 0 else "top",
+                rotation=90,
+                fontsize=7.5,
+                color=NAVY,
+            )
+    lowest = np.nanmin(frame[metrics].to_numpy(dtype=float))
+    ax.set_ylim(min(lowest - 0.15, 0.0), 1.18)
+    ax.axhline(0, color=NAVY, linewidth=0.8)
+    ax.set_xticks(
+        range(len(frame)), [name.replace(" ", "\n", 1) for name in frame.index]
+    )
+    ax.set(title="All metrics · five saved classifiers", ylabel="Score", xlabel="Model")
+    ax.legend(
+        title="Metric",
+        ncols=len(metrics),
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.2),
+        frameon=False,
+    )
+    return fig
+
+
 # Comparison activation is bound to the uploaded bytes and experiment run.
 def render_compare(batch: ValidatedBatch, resources: dict) -> None:
     """Evaluate five models explicitly and retain comparison across metric reruns."""
@@ -558,7 +616,6 @@ def render_compare(batch: ValidatedBatch, resources: dict) -> None:
             )
         else:
             st.session_state["comparison_identity"] = identity
-    metric = st.selectbox("Chart metric", METRICS, index=4, key="comparison_metric")
     if st.session_state.get("comparison_identity") != identity:
         st.info(
             "Select Evaluate all five models to build a comparison for this upload."
@@ -578,40 +635,12 @@ def render_compare(batch: ValidatedBatch, resources: dict) -> None:
     )
     if results[0]["auc_message"]:
         st.warning(results[0]["auc_message"])
-    if frame[metric].isna().all():
-        st.info("AUC chart is unavailable for this upload. Select another metric.")
-        return
-    fig, ax = new_chart((10, 4.8))
-    try:
-        bars = ax.bar(
-            frame.index,
-            frame[metric],
-            color=METRIC_ACCENTS[metric],
-            edgecolor=NAVY,
-            linewidth=0.8,
-            width=0.6,
-        )
-        ax.set_ylim((-1.15, 1.15) if metric == "MCC" else (0, 1.15))
-        ax.axhline(0, color=NAVY, linewidth=0.8)
-        ax.set(
-            title=f"{metric} · five saved classifiers", ylabel=metric, xlabel="Model"
-        )
-        ax.bar_label(bars, fmt="%.4f", padding=4, color=NAVY)
-        ax.set_xticks(
-            range(len(frame)),
-            [
-                "Logistic\nRegression",
-                "Decision\nTree",
-                "KNN",
-                "Gaussian\nNaive Bayes",
-                "SVM",
-            ],
-        )
-        show_chart(fig)
-    finally:
-        plt.close(fig)
+    if frame["AUC"].isna().all():
+        st.info("AUC is unavailable for this upload, so its bars are omitted.")
+    show_chart(metric_comparison_figure(frame))
     st.caption(
-        "Source: current upload. This comparison does not select or retrain models."
+        "Source: current upload. Each color is one metric, identified in the legend. "
+        "This comparison does not select or retrain models."
     )
 
 
