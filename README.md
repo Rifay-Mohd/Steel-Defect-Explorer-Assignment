@@ -2,7 +2,7 @@
 
 ## a. Problem statement
 
-Classify an already-detected steel plate defect into one of seven fault categories using 27 numeric tabular measurements. This assignment compares five saved classification pipelines and provides a local, inference-only Streamlit application for evaluating labeled CSV batches. The dataset contains defect records, not healthy/non-defective examples; these results do not establish healthy-versus-defective detection performance. The inputs are measurements, not images, and the application does not perform image analysis.
+Classify an already-detected steel plate defect into one of seven fault categories using 27 numeric tabular measurements. This assignment compares five saved classification pipelines and provides an inference-only Streamlit application. The mandatory labeled-CSV evaluation workflow is available under **Evaluate Batch**; **Predict One** is an optional, feature-only single-record extension in the current local build. The dataset contains defect records, not healthy/non-defective examples; these results do not establish healthy-versus-defective detection performance. The inputs are measurements, not images, and the application does not perform image analysis.
 
 ## b. Dataset description
 
@@ -33,7 +33,9 @@ X_Minimum, X_Maximum, Y_Minimum, Y_Maximum, Pixels_Areas, X_Perimeter, Y_Perimet
 
 ## c. GitHub repository link
 
-**Public repository:** [Rifay-Mohd/Steel-Defect-Explorer-Assignment](https://github.com/Rifay-Mohd/Steel-Defect-Explorer-Assignment). The published source is on the default branch, [`develop`](https://github.com/Rifay-Mohd/Steel-Defect-Explorer-Assignment/tree/develop). Repository visibility, branch availability, and required published files have been verified. Streamlit Community Cloud deployment is pending; no live app URL is available yet.
+**Public repository:** [Rifay-Mohd/Steel-Defect-Explorer-Assignment](https://github.com/Rifay-Mohd/Steel-Defect-Explorer-Assignment). The published source is on the default branch, [`develop`](https://github.com/Rifay-Mohd/Steel-Defect-Explorer-Assignment/tree/develop). Repository visibility, branch availability, and required published files were verified previously.
+
+**Live app:** [https://steel-defect-explorer-rifay.streamlit.app/](https://steel-defect-explorer-rifay.streamlit.app/). The user confirmed that this existing Streamlit Community Cloud deployment works and serves the previous build. The local pastel redesign and **Predict One** extension are pending push/publication and subsequent cloud verification; their availability at the live URL has not been verified.
 
 ## d. Models used
 
@@ -69,7 +71,7 @@ These are actual results on the frozen 389-row `test_data.csv`, copied from `res
 
 ### Shared metric policy
 
-`src/evaluation.py` is shared by offline training and app inference. Accuracy and multiclass MCC use hard predictions. Precision, recall, and F1 are unweighted macro averages over the fixed seven canonical classes with `zero_division=0`, including absent classes as zero contributions. AUC is seven-class one-vs-rest macro ROC AUC, with probability columns aligned to lexicographically sorted labels. Confusion matrices and class reports retain all seven classes.
+`src/evaluation.py` is shared by offline training and labeled-batch app evaluation. Feature-only **Predict One** inference does not call the evaluator or compute evaluation metrics. Accuracy and multiclass MCC use hard predictions. Precision, recall, and F1 are unweighted macro averages over the fixed seven canonical classes with `zero_division=0`, including absent classes as zero contributions. AUC is seven-class one-vs-rest macro ROC AUC, with probability columns aligned to lexicographically sorted labels. Confusion matrices and class reports retain all seven classes.
 
 If an uploaded batch lacks any expected true class, AUC is unavailable: the backend returns `None`, and the UI displays **N/A** with an explanation. The other five metrics remain available under the same fixed-label policy; a perfectly predicted batch containing only three classes therefore has macro precision, recall, and F1 of `3/7`, not 1.
 
@@ -150,9 +152,9 @@ The five slugs are `logistic_regression`, `decision_tree`, `knn`, `gaussian_nb`,
 PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -q -p no:cacheprovider
 ```
 
-**Local verification from the current project folder: 69 tests passed, with 15 warnings.** The warnings were 13 seaborn heatmap `set_bad` pending deprecations, scikit-learn's single-label metric warning, and pandas' `float_precision` deprecation in the saved-prediction fixture. `python -m pip check` also passed in the previous session. Tests read the existing experiment without retraining and cover raw-source integrity, frozen memberships and CV folds, saved inference parity, training-only scaler statistics, metric oracles, upload validation boundaries, app state transitions, and the training-only correlation reference.
+**Independent local verification from the current project folder: 138 tests passed, with 15 warnings.** The suite was run against the current app/backend using `.venv/bin/python` with the command above. The warnings were 13 seaborn heatmap `set_bad` pending deprecations, scikit-learn's single-label metric warning, and pandas' `float_precision` deprecation in the saved-prediction fixture. `python -m pip check` passed in a previous session. Tests read the existing experiment without retraining and cover raw-source integrity, frozen memberships and CV folds, saved inference parity, training-only scaler statistics, metric oracles, upload validation boundaries, app state transitions, and the training-only correlation reference. Single-record coverage includes exact feature validation, all five real pipelines, actual SVC prediction/probability disagreement, example/reset/clear controls, submitted snapshots, advisory range warnings, and failure-state cleanup.
 
-The Streamlit tests execute the real `app.py` through `AppTest` and mock only `st.file_uploader`'s returned object with a named `BytesIO`. Model loading, validation, inference, charts, controls, and session state remain real. This is local automated test evidence; it does not verify browser upload transport, the real uploader's `on_change` callback, or a remotely deployed application.
+The Streamlit tests execute the real `app.py` through `AppTest`, supplying uploads by mocking `st.file_uploader`'s returned object with a named `BytesIO`. Normal-path tests use real model loading, validation, inference, charts, controls, and session state; targeted tests also simulate source failures, metadata changes, and invalid probability output. This is local automated test evidence; it does not verify browser upload transport, the real uploader's `on_change` callback, or a remotely deployed application.
 
 ### 5. Launch Streamlit
 
@@ -160,11 +162,23 @@ The Streamlit tests execute the real `app.py` through `AppTest` and mock only `s
 python -m streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit. Download the labeled test CSV from the sidebar and explicitly upload it; the application does not silently evaluate the example. Choose a saved model in **Evaluate**, click **Evaluate all five models** in **Compare**, or inspect class and feature distributions in **Explore**. The app performs inference only; comparisons use the current upload and do not retrain or select models. Prediction downloads preserve upload order, zero-based `row_index`, canonical true/predicted labels, and seven class probabilities.
+Open the local URL printed by Streamlit. The current local UI uses a light pastel theme with mint input panels, lavender results, pale-blue headers, and teal accents. Its top-level tabs are **Evaluate Batch**, which opens by default, and **Predict One**. The app performs inference only and does not retrain models.
+
+**Evaluate Batch — mandatory labeled-CSV workflow:** download the labeled test CSV from the sidebar and explicitly upload it; the application does not silently evaluate the example. Within **Evaluate Batch**, choose a saved model in **Evaluate**, click **Evaluate all five models** in **Compare**, or inspect class and feature distributions in **Explore**. Comparisons use the current upload and do not select models. Prediction downloads preserve upload order, zero-based `row_index`, canonical true/predicted labels, and seven class probabilities.
 
 Uploads must be UTF-8 CSVs, optionally with a leading BOM, containing exactly the 27 finite numeric feature columns plus `fault_type`. Column order may vary; target labels must match the seven source labels exactly. The limits are 5 MiB and 10,000 data rows. Missing/extra/duplicate headers, target-indicator columns, unknown labels, missing/nonfinite/nonnumeric features, blank records, and malformed records are rejected. No imputation or label repair occurs. Replacing, invalidating, or removing an upload clears its derived results and comparison state; resources and results are session-local.
 
 The **Explore** tab also provides a training-only Pearson correlation heatmap across all 27 numeric features, excluding `fault_type`. Its source is the frozen `data/processed/training_data.csv` (1,552 rows), verified by SHA-256 against `metadata/split_manifest.json`: `258afa4b264d1c4dce75f71ed68d894398d305da3f36376a4a9a86b8bd47ad92`. This reference is independent of the current upload and excludes held-out rows.
+
+**Predict One — optional feature-only extension:** enter one record without a CSV upload or true category. The form represents exactly the same 27 schema features, grouped into **Position & extent**, **Area & perimeter**, **Luminosity**, **Steel & conveyer**, and **Shape & derived indices**. There are 25 numeric inputs plus one steel-grade selector that supplies the two complementary source fields: A300 maps to `(TypeOfSteel_A300=1, TypeOfSteel_A400=0)`, and A400 to `(0, 1)`. No `fault_type`, one-hot target indicators, or fabricated targets are supplied to single-record inference.
+
+The initial demonstration values are the actual first row's features from the frozen training CSV, after its SHA-256 and row count are checked against the split manifest. These are training measurements, explicitly labeled as a demonstration, not an independent test. **Load example / reset** and **Clear measurements** sit outside the submission form; loading the example restores those measurements, while clearing empties them, and both clear the previous single-record result. If the training reference is unavailable or fails verification, example loading is disabled and manual prediction remains available.
+
+The form's **Prediction model** defaults to **SVM**, the training-only CV-selected model; any of the five saved pipelines can be chosen independently of the sidebar's batch model. Click **Predict defect category** to submit. Single-record validation requires exactly 27 finite numeric values, binary complementary steel flags, strictly increasing X/Y bounds, and minimum luminosity no greater than maximum luminosity. Observed training ranges appear in numeric-input help as advisory information; source units are not documented. A submitted value outside an observed range produces a warning but is not clamped or rejected solely for being outside that range.
+
+The result shows the hard predicted category, its estimated model probability, all seven estimated class probabilities, and an expandable submitted-model/measurement snapshot. These probabilities are model estimates, not confidence guarantees or measured single-record accuracy. With no true label, **Predict One** computes no Accuracy, AUC, Precision, Recall, F1, MCC, confusion matrix, or classification report. The hard label comes from `pipeline.predict`, separately from `predict_proba`; if SVC calibration ranks another category highest, the UI explains the mismatch and retains the hard decision. The displayed predicted-category probability is not substituted with the maximum probability.
+
+Results are marked **LAST SUBMITTED** with the submitted model, experiment, and feature fingerprint. Editing form inputs or the prediction model does not update that snapshot: resubmit to obtain a new result. An invalid or failed submission clears the previous single-record output. Batch upload replacement/removal does not clear an independent single-record result; a refreshed experiment/resource identity does.
 
 ## Model compatibility and recorded warnings
 
@@ -174,4 +188,6 @@ The experiment records **31 `FutureWarning` occurrences** from SVM fitting under
 
 ## Local status
 
-The local experiment is complete, all five pipelines and recorded outputs are present, and the 69-test suite passes from the current project folder. Local browser upload, evaluation, and five-model comparison were tested in a previous session; retained screenshots are [evaluation](results/figures/local_app_evaluation.png) and [comparison](results/figures/local_app_comparison.png). That browser check predates the project folder move; browser verification from the current folder remains pending. The public GitHub repository and required files on `develop` have been verified. Remote deployment, BITS Virtual Lab execution evidence, and the final submission PDF remain pending.
+The local experiment is complete, all five pipelines and recorded outputs are present, and independent verification of the current local app/backend yielded **138 passed, 15 warnings**. The pastel redesign and optional **Predict One** extension are implemented locally and covered by automated tests; pushing/publishing the updated UI and verifying it on Streamlit Community Cloud remain pending.
+
+The existing [live app](https://steel-defect-explorer-rifay.streamlit.app/) is deployed and user-confirmed working on the previous build. That confirmation does not establish deployment of the new local changes. Local browser upload, evaluation, and five-model comparison were tested in a previous session; retained screenshots are [evaluation](results/figures/local_app_evaluation.png) and [comparison](results/figures/local_app_comparison.png). Those screenshots predate the project folder move and the current redesign, so they are previous-version browser evidence, not verification of the new theme or **Predict One**. Browser verification of the updated UI from the current folder remains pending. The public GitHub repository and required files on `develop` were verified previously. BITS Virtual Lab execution evidence and the final submission PDF remain pending.

@@ -4,6 +4,7 @@ import csv
 import hashlib
 from dataclasses import dataclass
 from io import StringIO
+from numbers import Real
 from typing import cast
 
 import numpy as np
@@ -53,6 +54,62 @@ def _schema_columns(schema: dict) -> tuple[list[str], str, list[str]]:
     if not isinstance(target, str) or not target or target in features:
         raise ValueError("Schema target must be a nonempty, separate column name.")
     return features, target, classes
+
+
+def validate_record(record: dict, schema: dict) -> pd.DataFrame:
+    """Return one finite float64 row in the schema's exact 27-feature order.
+
+    Numeric strings are accepted; booleans, missing/extra fields, and nonnumeric
+    or nonfinite values are rejected. Only source-compatible steel, coordinate,
+    and luminosity relationships are enforced, never observed training ranges.
+    """
+    features, _, classes = _schema_columns(schema)
+    if len(features) != 27 or len(classes) != 7:
+        raise ValueError("Single-record schema requires 27 features and seven classes.")
+    if not isinstance(record, dict):
+        raise ValidationError("Record must be a feature dictionary.")
+    missing, extra = set(features) - set(record), set(record) - set(features)
+    if missing or extra:
+        raise ValidationError(
+            f"Record features do not match schema; missing={sorted(missing)}, "
+            f"extra={sorted(map(str, extra))}."
+        )
+
+    # Parse scalar values explicitly so bools and container coercions cannot pass.
+    values = []
+    for feature in features:
+        value = record[feature]
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, (Real, str)):
+            raise ValidationError(f"Feature {feature} must be a numeric scalar.")
+        try:
+            number = float(value)
+        except (ValueError, OverflowError) as exc:
+            raise ValidationError(
+                f"Feature {feature} must be finite numeric data."
+            ) from exc
+        if not np.isfinite(number):
+            raise ValidationError(f"Feature {feature} must be finite numeric data.")
+        values.append(number)
+    frame = pd.DataFrame([values], columns=features, dtype=np.float64)
+
+    # Enforce physical relationships without clipping or imposing training bounds.
+    row = frame.iloc[0]
+    steel = ["TypeOfSteel_A300", "TypeOfSteel_A400"]
+    pairs = [
+        ("X_Minimum", "X_Maximum"),
+        ("Y_Minimum", "Y_Maximum"),
+        ("Minimum_of_Luminosity", "Maximum_of_Luminosity"),
+    ]
+    if not set(steel + [name for pair in pairs for name in pair]).issubset(features):
+        raise ValueError("Single-record schema lacks required source features.")
+    if not row[steel].isin([0.0, 1.0]).all() or row[steel].sum() != 1.0:
+        raise ValidationError("Steel flags must be binary and complementary.")
+    for minimum, maximum in pairs[:2]:
+        if row[minimum] >= row[maximum]:
+            raise ValidationError(f"{minimum} must be less than {maximum}.")
+    if row[pairs[2][0]] > row[pairs[2][1]]:
+        raise ValidationError("Minimum luminosity must not exceed maximum luminosity.")
+    return frame
 
 
 def validate_upload(csv_bytes: bytes, schema: dict) -> ValidatedBatch:

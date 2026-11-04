@@ -7,15 +7,16 @@ from io import BytesIO
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 import sklearn
 from sklearn.exceptions import InconsistentVersionWarning
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
 
-from src.config import MODEL_NAMES, ROOT
+from src.config import MODEL_NAMES, ROOT, TARGET
 from src.evaluation import evaluate_predictions
-from src.validation import ValidatedBatch, _schema_columns
+from src.validation import ValidatedBatch, _schema_columns, validate_record
 
 
 def get_experiment(experiment_path: str | Path | None = None) -> dict:
@@ -121,6 +122,76 @@ def load_artifacts(
             raise ValueError(f"Pipeline does not support probabilities for {slug}.")
         registry[slug] = pipeline
     return registry
+
+
+def predict_record(model_id: str, features: pd.DataFrame, registry: dict) -> dict:
+    """Predict one feature-only row using the verified registry's fitted contract.
+
+    Return the hard prediction and its probability separately from probability
+    argmax. The seven probabilities follow ``classes`` in pipeline order. The
+    SHA-256 fingerprints ordered float64 content and names, excluding row index.
+    No target, evaluator, or evaluation metrics are used.
+    """
+    if (
+        not isinstance(model_id, str)
+        or model_id not in MODEL_NAMES
+        or not isinstance(registry, dict)
+        or model_id not in registry
+    ):
+        raise ValueError("Unknown model ID.")
+    pipeline = registry[model_id]
+
+    # Derive the schema from fitted metadata already verified by load_artifacts.
+    expected = list(getattr(pipeline, "feature_names_in_", []))
+    labels = np.asarray(getattr(pipeline, "classes_", []))
+    if labels.ndim != 1 or len(labels) != 7:
+        raise ValueError("Pipeline must expose seven class labels.")
+    classes = labels.tolist()
+    schema = {"features": expected, "target": TARGET, "classes": classes}
+    _schema_columns(schema)
+    if len(expected) != 27 or getattr(pipeline, "n_features_in_", None) != 27:
+        raise ValueError("Pipeline must expect exactly 27 features.")
+    if (
+        not isinstance(features, pd.DataFrame)
+        or features.shape != (1, 27)
+        or features.columns.tolist() != expected
+    ):
+        raise ValueError("Prediction requires one row in the fitted feature order.")
+    if any(
+        not pd.api.types.is_numeric_dtype(dtype)
+        or pd.api.types.is_bool_dtype(dtype)
+        or pd.api.types.is_complex_dtype(dtype)
+        for dtype in features.dtypes
+    ):
+        raise ValueError("Prediction features must be finite real numeric values.")
+    ordered = validate_record(features.iloc[0].to_dict(), schema)
+
+    # Preserve predict's decision even when SVC probability calibration disagrees.
+    predictions = np.asarray(pipeline.predict(ordered))
+    if predictions.shape != (1,) or predictions[0] not in classes:
+        raise ValueError("Pipeline must predict one known class.")
+    prediction = str(predictions[0])
+    matrix = np.asarray(pipeline.predict_proba(ordered), dtype=float)
+    if matrix.shape != (1, 7):
+        raise ValueError("Probabilities must have shape (1, 7).")
+    if not np.isfinite(matrix).all() or (matrix < 0).any() or (matrix > 1).any():
+        raise ValueError("Probabilities must be finite values between zero and one.")
+    if not np.allclose(matrix.sum(axis=1), 1.0, rtol=1e-7, atol=1e-8):
+        raise ValueError("Probabilities must sum to one.")
+    probabilities = matrix[0].copy()
+
+    # Canonical binary serialization makes identity independent of UI key/index order.
+    content = "\x00".join(expected).encode() + b"\x00"
+    content += ordered.to_numpy(dtype="<f8").tobytes(order="C")
+    return {
+        "model_id": model_id,
+        "prediction": prediction,
+        "classes": classes,
+        "probabilities": probabilities,
+        "predicted_probability": float(probabilities[classes.index(prediction)]),
+        "top_probability_class": str(classes[int(probabilities.argmax())]),
+        "feature_fingerprint": hashlib.sha256(content).hexdigest(),
+    }
 
 
 def evaluate_model(model_id: str, batch: ValidatedBatch, registry: dict) -> dict:

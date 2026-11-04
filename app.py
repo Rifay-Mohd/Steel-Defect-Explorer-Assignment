@@ -1,6 +1,7 @@
 """Session-local, inference-only manufacturing dashboard for steel fault labels."""
 
 import hashlib
+import html
 import json
 
 import matplotlib.pyplot as plt
@@ -11,15 +12,15 @@ import streamlit as st
 from streamlit.typing import UploadedFile
 
 from src.config import MODEL_NAMES, ROOT, SCHEMA_PATH, SPLIT_PATH, TEST_PATH, TRAIN_PATH
-from src.inference import evaluate_model, get_experiment, load_artifacts
+from src.inference import evaluate_model, get_experiment, load_artifacts, predict_record
 from src.validation import (
     MAX_ROWS,
     MAX_UPLOAD_BYTES,
     ValidatedBatch,
     ValidationError,
+    validate_record,
     validate_upload,
 )
-
 
 # Fixed presentation vocabulary; CSVs and inference retain canonical source labels.
 METRICS = ("Accuracy", "AUC", "Precision", "Recall", "F1", "MCC")
@@ -32,10 +33,75 @@ DISPLAY_LABELS = {
     "Stains": "Stains",
     "Z_Scratch": "Z Scratch",
 }
-COLORS = ("#147d80", "#c08043", "#334d70", "#9c6574", "#71845a", "#5c96ad", "#8273a1")
-NAVY = "#172b42"
-TEAL = "#147d80"
-PAPER = "#faf8f2"
+NAVY = "#293747"
+PAPER = "#fafcfb"
+
+# Single source of truth for class colour: pastel "fill" for backgrounds and a darker
+# "ink" for text, borders and small chart marks. Ink on fill is >= 4.5:1 (tested).
+# Colour is always paired with the class name, never the only signal.
+PALETTE = {
+    "Bumps": {"fill": "#cfe3f7", "ink": "#1f4e79"},
+    "Dirtiness": {"fill": "#fbd9c4", "ink": "#8a3b12"},
+    "K_Scatch": {"fill": "#e0d4f5", "ink": "#4a2f86"},
+    "Other_Faults": {"fill": "#dcdfe4", "ink": "#3d4655"},
+    "Pastry": {"fill": "#f8d4e4", "ink": "#8a2753"},
+    "Stains": {"fill": "#d2efd9", "ink": "#1f6b3a"},
+    "Z_Scratch": {"fill": "#f6efb8", "ink": "#6b5a00"},
+}
+# Metric identity accents: pure identification, deliberately not a quality scale.
+METRIC_ACCENTS = {
+    "Accuracy": "#b8d8f0",
+    "AUC": "#d6c8f0",
+    "Precision": "#f3c9dc",
+    "Recall": "#f9dcc0",
+    "F1": "#c6e8d0",
+    "MCC": "#f2e8a8",
+}
+# One subtle tint per Predict One form section, for scannability only.
+SECTION_TINTS = ("#e3f1ea", "#e4edf9", "#f1e8f8", "#fbf0dc", "#e6f0f2")
+# Highest value per comparison column; neutral blue, not a good/bad signal.
+BEST_CELL_STYLE = "background-color: #cfe3f7; color: #1f4e79; font-weight: 700"
+
+# Source integer measurements precede the derived indices; steel uses one selector.
+INTEGER_FEATURES = {
+    "X_Minimum",
+    "X_Maximum",
+    "Y_Minimum",
+    "Y_Maximum",
+    "Pixels_Areas",
+    "X_Perimeter",
+    "Y_Perimeter",
+    "Sum_of_Luminosity",
+    "Minimum_of_Luminosity",
+    "Maximum_of_Luminosity",
+    "Length_of_Conveyer",
+    "Steel_Plate_Thickness",
+}
+FEATURE_GROUPS = {
+    "01 / Position & extent": ("X_Minimum", "X_Maximum", "Y_Minimum", "Y_Maximum"),
+    "02 / Area & perimeter": ("Pixels_Areas", "X_Perimeter", "Y_Perimeter"),
+    "03 / Luminosity": (
+        "Sum_of_Luminosity",
+        "Minimum_of_Luminosity",
+        "Maximum_of_Luminosity",
+        "Luminosity_Index",
+    ),
+    "04 / Steel & conveyer": ("Length_of_Conveyer", "Steel_Plate_Thickness"),
+    "05 / Shape & derived indices": (
+        "Edges_Index",
+        "Empty_Index",
+        "Square_Index",
+        "Outside_X_Index",
+        "Edges_X_Index",
+        "Edges_Y_Index",
+        "Outside_Global_Index",
+        "LogOfAreas",
+        "Log_X_Index",
+        "Log_Y_Index",
+        "Orientation_Index",
+        "SigmoidOfAreas",
+    ),
+}
 
 
 def display_label(label: str) -> str:
@@ -43,41 +109,130 @@ def display_label(label: str) -> str:
     return DISPLAY_LABELS.get(label, label.replace("_", " "))
 
 
-def style_page() -> None:
-    """Apply local CSS for an accessible, warm manufacturing control panel."""
-    st.markdown(
-        """
-        <style>
-        .stApp { background: #f5f2e9; color: #172b42; }
-        [data-testid="stHeader"] { background: #f5f2e9; }
-        [data-testid="stSidebar"] { background: #e9eee9; border-right: 1px solid #cbd6d1; }
-        .block-container { max-width: 1500px; padding-top: 4.5rem; padding-bottom: 3rem; }
-        h1, h2, h3 { color: #172b42; font-family: ui-sans-serif, system-ui, sans-serif; }
-        h1 { font-weight: 800 !important; letter-spacing: -.045em; }
-        h2, h3 { letter-spacing: -.025em; }
-        p, label, [data-testid="stCaptionContainer"] { color: #33495b; }
-        [data-testid="stMetric"] { background: #faf8f2; border: 1px solid #d5ddd5;
-          border-top: 3px solid #147d80; border-radius: 8px; padding: 15px 12px; }
-        [data-testid="stMetricValue"] { color: #172b42; font-variant-numeric: tabular-nums;
-          font-size: clamp(1.3rem, 2.2vw, 2rem); }
-        [data-baseweb="tab-list"] { gap: 1.5rem; border-bottom: 1px solid #cbd6d1; }
-        [data-baseweb="tab"] { color: #172b42; font-weight: 650; }
-        [data-baseweb="tab-highlight"] { background-color: #147d80; }
-        .stButton > button[kind="primary"] { background: #147d80; color: white; border: 0; }
-        .stButton > button, .stDownloadButton > button { border-radius: 6px; }
-        .control-header { border-left: 5px solid #147d80; padding: .3rem 0 .4rem 1.2rem;
-          margin-bottom: 1.1rem; }
-        .eyebrow { font: 700 .75rem ui-monospace, monospace; letter-spacing: .16em;
-          color: #147d80; text-transform: uppercase; }
-        .control-header h1 { margin: .25rem 0; font-size: clamp(2rem, 4vw, 3.4rem); }
-        .control-header p { max-width: 850px; margin: .3rem 0; line-height: 1.6; }
-        .category-strip { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1rem 0 1.5rem; }
-        .category-strip span { background: #e5ece6; color: #244c50; padding: .3rem .65rem;
-          border: 1px solid #cbd8cd; border-radius: 4px; font-size: .8rem; font-weight: 600; }
-        </style>
-        """,
-        unsafe_allow_html=True,
+def class_style(label: str) -> dict:
+    """Return the pastel fill and dark ink for a canonical class label."""
+    return PALETTE.get(label, {"fill": "#e8ecef", "ink": NAVY})
+
+
+def class_chip(label: str, extra: str = "") -> str:
+    """Return an escaped HTML chip: palette colours plus the always-visible class name."""
+    colors = class_style(label)
+    return (
+        f'<span class="class-chip" style="background:{colors["fill"]};'
+        f'color:{colors["ink"]};border-color:{colors["ink"]}">'
+        f"{html.escape(display_label(label))}{html.escape(extra)}</span>"
     )
+
+
+def build_css() -> str:
+    """Compose the scoped stylesheet, generating per-key rules from the palettes."""
+    metric_rules = "".join(
+        f".st-key-metric_card_{metric} {{ background: {color}55; "
+        f"border-top: 4px solid {color}; }}\n"
+        for metric, color in METRIC_ACCENTS.items()
+    )
+    return (
+        """
+        :root { --radius: 14px; --shadow: 0 1px 3px rgba(41,55,71,.10), 0 4px 12px rgba(41,55,71,.06); }
+        .block-container { max-width: 1500px; padding-top: 4.5rem; padding-bottom: 3rem; }
+        .control-header { background: linear-gradient(110deg, #d8f1e6 0%, #e4dcf5 52%, #d6e8f7 100%);
+          border-radius: var(--radius); box-shadow: var(--shadow);
+          padding: 1rem 1.3rem; margin-bottom: .8rem; color: #293747; }
+        .eyebrow { font: 700 .75rem ui-monospace, monospace; letter-spacing: .16em;
+          color: #0f5f56; text-transform: uppercase; }
+        .control-header h1 { margin: .25rem 0; font-size: clamp(1.7rem, 3vw, 2.3rem); }
+        .control-header p { max-width: 1000px; margin: .3rem 0; line-height: 1.5; }
+        .category-strip { display: flex; flex-wrap: wrap; gap: .45rem; margin: .7rem 0 1rem; }
+        .class-chip { display: inline-block; padding: .22rem .65rem; border-radius: 999px;
+          border: 1px solid; font-size: .82rem; font-weight: 650; white-space: nowrap; }
+        .section-heading { margin: 1rem 0 .4rem; padding: .35rem .8rem; border-radius: 10px;
+          font-size: 1.15rem; font-weight: 700; color: #293747; }
+        .result-card { border-radius: var(--radius); border: 2px solid; padding: .9rem 1.1rem;
+          margin-bottom: .6rem; box-shadow: var(--shadow); overflow-wrap: anywhere; }
+        .result-card .result-name { font-size: 1.25rem; margin: .1rem 0 .3rem; }
+        .result-card .result-meta { font-size: .95rem; margin: .1rem 0; }
+        .result-card .class-chip { margin: .1rem .3rem .1rem 0; }
+        .legend-note { font-size: .85rem; color: #4a5766; }
+        .st-key-single_form, .st-key-single_result { border-radius: var(--radius); box-shadow: var(--shadow); }
+        .st-key-single_form { background: #f0f7f4; }
+        .st-key-single_result { background: #fbfaff; }
+        [class*="st-key-metric_card_"] { border-radius: var(--radius); box-shadow: var(--shadow);
+          padding: .6rem .8rem; }
+        [class*="st-key-metric_card_"] label, [class*="st-key-metric_card_"] p { white-space: normal; }
+        [data-testid="stSidebar"] { border-right: 1px solid #d5e3dd; }
+        .stButton > button, .stDownloadButton > button { border-radius: 10px; transition: box-shadow .15s, transform .15s; }
+        .stButton > button:hover, .stDownloadButton > button:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+        .stButton > button:focus-visible, .stDownloadButton > button:focus-visible,
+        input:focus-visible, [role="combobox"]:focus-within { outline: 3px solid #168578; outline-offset: 2px; }
+        @media (max-width: 640px) {
+          .block-container { padding-left: .8rem; padding-right: .8rem; }
+          .result-card .result-name { font-size: 1.2rem; }
+          .class-chip { white-space: normal; }
+        }
+        """
+        + metric_rules
+    )
+
+
+def style_page() -> None:
+    """Apply scoped local CSS for a pastel, accessible manufacturing control panel."""
+    st.markdown(f"<style>{build_css()}</style>", unsafe_allow_html=True)
+
+
+def best_cell_styles(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return CSS per cell marking the maximum of every column (all ties; NaN ignored)."""
+    styles = pd.DataFrame("", index=frame.index, columns=frame.columns)
+    for column in frame.columns:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        if values.notna().any():
+            styles.loc[values == values.max(), column] = BEST_CELL_STYLE
+    return styles
+
+
+def comparison_styler(frame: pd.DataFrame):
+    """Format the comparison table and highlight the highest value in each column."""
+    return frame.style.format("{:.4f}", na_rep="N/A").apply(best_cell_styles, axis=None)
+
+
+def class_cell_styler(frame: pd.DataFrame, column: str, styler=None):
+    """Colour display-label cells of one column with their class palette."""
+    by_display = {display_label(k): v for k, v in PALETTE.items()}
+
+    def paint(values: pd.Series) -> list[str]:
+        """Return palette CSS for known class names and nothing for other rows."""
+        return [
+            f"background-color: {by_display[v]['fill']}; color: {by_display[v]['ink']}; "
+            "font-weight: 650"
+            if v in by_display
+            else ""
+            for v in values
+        ]
+
+    return (styler if styler is not None else frame.style).apply(paint, subset=[column])
+
+
+def result_card_html(result: dict, model_name: str) -> str:
+    """Build the prediction card coloured by the hard predicted class, showing both
+    the predicted class and the highest-probability class when they differ."""
+    colors = class_style(result["prediction"])
+    top = result["top_probability_class"]
+    parts = [
+        f'<div class="result-card" style="background:{colors["fill"]};'
+        f'border-color:{colors["ink"]};color:{colors["ink"]}">',
+        f'<div class="result-name">{class_chip(result["prediction"])}</div>',
+        f'<div class="result-meta">Model: {html.escape(model_name)} · '
+        f"probability for predicted category: <b>{result['predicted_probability']:.2%}</b></div>",
+    ]
+    if result["prediction"] != top:
+        parts.append(
+            '<div class="result-meta">Hard prediction '
+            + class_chip(result["prediction"])
+            + " · Highest probability "
+            + class_chip(top)
+            + "</div>"
+        )
+    parts.append("</div>")
+    return "".join(parts)
 
 
 # Session lifecycle: invalidate derived data before validating replacement bytes.
@@ -115,6 +270,7 @@ def session_resources() -> dict:
     resources = st.session_state.get("resources")
     if resources is None or resources["identity"] != identity:
         reset_upload_state()
+        st.session_state.pop("single_result", None)
         st.session_state.pop("resources", None)
         registry = load_artifacts(root=ROOT)
         resources = {
@@ -132,7 +288,10 @@ def render_sidebar(schema: dict | None) -> tuple[UploadedFile | None, str]:
     """Render input controls, the downloadable example, and the schema contract."""
     with st.sidebar:
         st.markdown("### Inspection workspace")
-        st.caption("01 / INPUT BATCH")
+        st.caption("EVALUATE BATCH / LABELED CSV")
+        st.caption(
+            "Predict One works without an upload. These controls are for batch evaluation."
+        )
         try:
             st.download_button(
                 "Download labeled test CSV",
@@ -208,7 +367,7 @@ def current_batch(uploaded: UploadedFile | None, schema: dict) -> ValidatedBatch
         st.session_state["upload_identity"] = identity
         st.error(f"CSV rejected: {exc}")
         st.info(
-            "Correct the CSV using the sidebar schema, then upload it again. No results are retained."
+            "Correct the CSV using the sidebar schema, then upload it again. No batch results are retained."
         )
         return None
     st.session_state["batch"] = batch
@@ -287,6 +446,11 @@ def render_confusion(result: dict) -> None:
         )
         plt.setp(ax.get_xticklabels(), rotation=35, ha="right")
         plt.setp(ax.get_yticklabels(), rotation=0)
+        # Tick text takes each class's dark ink so classes match the rest of the app.
+        for tick, label in zip(ax.get_xticklabels(), result["classes"]):
+            tick.set_color(class_style(label)["ink"])
+        for tick, label in zip(ax.get_yticklabels(), result["classes"]):
+            tick.set_color(class_style(label)["ink"])
         show_chart(fig)
     finally:
         plt.close(fig)
@@ -330,7 +494,9 @@ def render_evaluate(batch: ValidatedBatch, model_id: str, resources: dict) -> No
         return
     for column, metric in zip(st.columns(6), METRICS):
         value = result["metrics"][metric]
-        column.metric(metric, "N/A" if value is None else f"{value:.4f}")
+        # Per-metric accent identifies the metric only; it never signals pass or fail.
+        with column.container(key=f"metric_card_{metric}"):
+            st.metric(metric, "N/A" if value is None else f"{value:.4f}")
     if result["auc_message"]:
         st.warning(result["auc_message"])
     st.caption("AUC: seven-class one-vs-rest macro ROC AUC. MCC ranges from −1 to +1.")
@@ -341,13 +507,17 @@ def render_evaluate(batch: ValidatedBatch, model_id: str, resources: dict) -> No
     with right:
         st.markdown("#### Classification report")
         st.dataframe(
-            report_frame(result).style.format(
-                {
-                    "Precision": "{:.4f}",
-                    "Recall": "{:.4f}",
-                    "F1": "{:.4f}",
-                    "Support": "{:d}",
-                }
+            class_cell_styler(
+                report_frame(result),
+                "Category",
+                report_frame(result).style.format(
+                    {
+                        "Precision": "{:.4f}",
+                        "Recall": "{:.4f}",
+                        "F1": "{:.4f}",
+                        "Support": "{:d}",
+                    }
+                ),
             ),
             hide_index=True,
             width="stretch",
@@ -401,7 +571,11 @@ def render_compare(batch: ValidatedBatch, resources: dict) -> None:
             for result in results
         ]
     ).set_index("Model")
-    st.dataframe(frame.style.format("{:.4f}", na_rep="N/A"), width="stretch")
+    st.dataframe(comparison_styler(frame), width="stretch")
+    st.caption(
+        "Blue cells mark the highest value in each column on the current upload. "
+        "This is a factual maximum, not a quality guarantee."
+    )
     if results[0]["auc_message"]:
         st.warning(results[0]["auc_message"])
     if frame[metric].isna().all():
@@ -409,7 +583,14 @@ def render_compare(batch: ValidatedBatch, resources: dict) -> None:
         return
     fig, ax = new_chart((10, 4.8))
     try:
-        bars = ax.bar(frame.index, frame[metric], color=TEAL, width=0.6)
+        bars = ax.bar(
+            frame.index,
+            frame[metric],
+            color=METRIC_ACCENTS[metric],
+            edgecolor=NAVY,
+            linewidth=0.8,
+            width=0.6,
+        )
         ax.set_ylim((-1.15, 1.15) if metric == "MCC" else (0, 1.15))
         ax.axhline(0, color=NAVY, linewidth=0.8)
         ax.set(
@@ -435,6 +616,18 @@ def render_compare(batch: ValidatedBatch, resources: dict) -> None:
 
 
 # Frozen-training reference: verify source bytes before computing feature correlations.
+def verified_training(schema: dict) -> ValidatedBatch:
+    """Read and validate the frozen training source against its split manifest."""
+    raw = TRAIN_PATH.read_bytes()
+    training = json.loads(SPLIT_PATH.read_bytes())["partitions"]["training"]
+    if hashlib.sha256(raw).hexdigest() != training["sha256"]:
+        raise ValueError("Training CSV SHA-256 does not match the split manifest.")
+    batch = validate_upload(raw, schema)
+    if batch.row_count != training["rows"]:
+        raise ValueError("Training row count does not match the split manifest.")
+    return batch
+
+
 def render_training_correlation(schema: dict) -> None:
     """Plot signed Pearson correlations of verified training features, excluding target.
 
@@ -443,17 +636,7 @@ def render_training_correlation(schema: dict) -> None:
     """
     with st.expander("Feature correlation · frozen training data", expanded=False):
         try:
-            raw = TRAIN_PATH.read_bytes()
-            training = json.loads(SPLIT_PATH.read_bytes())["partitions"]["training"]
-            if hashlib.sha256(raw).hexdigest() != training["sha256"]:
-                raise ValueError(
-                    "Training CSV SHA-256 does not match the split manifest."
-                )
-            batch = validate_upload(raw, schema)
-            if batch.row_count != training["rows"]:
-                raise ValueError(
-                    "Training row count does not match the split manifest."
-                )
+            batch = verified_training(schema)
         except OSError:
             st.warning(
                 "Training correlation unavailable: the frozen training CSV or split manifest "
@@ -508,7 +691,7 @@ def render_explore(batch: ValidatedBatch, schema: dict) -> None:
     )
     classes = schema["classes"]
     labels = [display_label(c) for c in classes]
-    palette = dict(zip(labels, COLORS))
+    palette = {display_label(k): v["ink"] for k, v in PALETTE.items()}
     counts = batch.target.value_counts().reindex(classes, fill_value=0)
     summary = pd.DataFrame(
         {
@@ -521,14 +704,21 @@ def render_explore(batch: ValidatedBatch, schema: dict) -> None:
     with left:
         st.markdown("#### Class composition")
         st.dataframe(
-            summary.style.format({"Percent": "{:.2f}%"}),
+            class_cell_styler(
+                summary, "Category", summary.style.format({"Percent": "{:.2f}%"})
+            ),
             hide_index=True,
             width="stretch",
         )
     with right:
         fig, ax = new_chart((8, 4))
         try:
-            ax.barh(labels, counts.to_numpy(), color=COLORS)
+            ax.barh(
+                labels,
+                counts.to_numpy(),
+                color=[class_style(c)["fill"] for c in classes],
+                edgecolor=[class_style(c)["ink"] for c in classes],
+            )
             ax.invert_yaxis()
             ax.set(
                 title="Records by defect category", xlabel="Records", ylabel="Category"
@@ -546,7 +736,7 @@ def render_explore(batch: ValidatedBatch, schema: dict) -> None:
     try:
         # Boxplots handle single-record classes and constant-valued features.
         # Use Matplotlib directly: seaborn 0.13 passes the deprecated vert argument.
-        ax.boxplot(
+        box = ax.boxplot(
             [
                 batch.features.loc[batch.target == label, feature].to_numpy()
                 for label in classes
@@ -558,7 +748,7 @@ def render_explore(batch: ValidatedBatch, schema: dict) -> None:
             whis=1.5,
             patch_artist=True,
             boxprops={
-                "facecolor": sns.desaturate("#a4cebf", 0.75),
+                "facecolor": "#e8ecef",
                 "edgecolor": "#707070",
             },
             medianprops={"color": "#707070", "solid_capstyle": "butt"},
@@ -571,6 +761,11 @@ def render_explore(batch: ValidatedBatch, schema: dict) -> None:
                 "markerfacecolor": "none",
             },
         )
+        for patch, label in zip(box["boxes"], classes):
+            patch.set(
+                facecolor=class_style(label)["fill"],
+                edgecolor=class_style(label)["ink"],
+            )
         ax.set(
             title=f"{feature.replace('_', ' ')} · distribution across classes",
             xlabel="Defect category",
@@ -621,6 +816,195 @@ def render_explore(batch: ValidatedBatch, schema: dict) -> None:
     render_training_correlation(schema)
 
 
+# Single-record inference never depends on upload state or evaluation metrics.
+def reset_single_inputs(example: dict | None) -> None:
+    """Set real example measurements or blank inputs before widgets are rendered."""
+    for features in FEATURE_GROUPS.values():
+        for feature in features:
+            value = None if example is None else example[feature]
+            if value is not None:
+                value = int(value) if feature in INTEGER_FEATURES else float(value)
+            st.session_state[f"single_{feature}"] = value
+    steel = None
+    if example is not None:
+        steel = "A300" if example["TypeOfSteel_A300"] == 1 else "A400"
+    st.session_state["single_steel"] = steel
+    st.session_state["single_initialized"] = True
+    st.session_state.pop("single_result", None)
+
+
+def render_single_result(snapshot: dict) -> None:
+    """Present only the last submitted model, hard prediction, and probabilities."""
+    result = snapshot["result"]
+    with st.container(border=True, key="single_result"):
+        st.subheader(f"Predicted category: {display_label(result['prediction'])}")
+        st.markdown(
+            result_card_html(result, MODEL_NAMES[result["model_id"]]),
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            f"LAST SUBMITTED / {MODEL_NAMES[result['model_id']]} · "
+            f"Experiment {snapshot['run_id']} · SHA-256 {result['feature_fingerprint'][:12]}"
+        )
+        st.caption(
+            "This result belongs to the submitted model and measurements below. "
+            "Input or model edits require resubmission; they do not update this result."
+        )
+        if result["prediction"] != result["top_probability_class"]:
+            st.info(
+                "The hard prediction is retained from the model's predict decision. "
+                "SVC probability calibration can rank another category highest: "
+                f"{display_label(result['top_probability_class'])}. "
+                "The probability above is for the predicted category, not the maximum probability."
+            )
+        fig, ax = new_chart((9, 4))
+        try:
+            bars = ax.barh(
+                [display_label(label) for label in result["classes"]],
+                result["probabilities"],
+                color=[class_style(label)["fill"] for label in result["classes"]],
+                edgecolor=[
+                    class_style(label)["ink"]
+                    if label == result["prediction"]
+                    else "#9aa7b3"
+                    for label in result["classes"]
+                ],
+                linewidth=[
+                    2.5 if label == result["prediction"] else 0.8
+                    for label in result["classes"]
+                ],
+            )
+            ax.invert_yaxis()
+            ax.set(
+                xlim=(0, 1.15),
+                xlabel="Model probability",
+                title="All seven defect categories",
+            )
+            ax.bar_label(
+                bars,
+                labels=[f"{value:.2%}" for value in result["probabilities"]],
+                padding=4,
+            )
+            show_chart(fig)
+        finally:
+            plt.close(fig)
+        with st.expander("Submitted model & measurement snapshot"):
+            st.write(f"Model: {MODEL_NAMES[result['model_id']]}")
+            st.dataframe(
+                pd.DataFrame([snapshot["inputs"]]), hide_index=True, width="stretch"
+            )
+
+
+def render_predict_one(resources: dict) -> None:
+    """Collect 27 feature-only inputs and explicitly submit independent inference."""
+    schema = resources["schema"]
+    st.subheader("One defect. One saved classifier.")
+    st.caption(
+        "Enter measurements for an already-detected defect. No CSV or true category is required."
+    )
+    training = None
+    example = None
+    try:
+        training = verified_training(schema).features
+        example = training.iloc[0].to_dict()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.warning(
+            f"Training example unavailable: {exc}. Enter measurements manually; prediction remains available."
+        )
+    load_column, clear_column = st.columns(2)
+    load_example = load_column.button(
+        "Load example / reset", key="single_load_example", disabled=example is None
+    )
+    clear_inputs = clear_column.button("Clear measurements", key="single_clear")
+    if clear_inputs:
+        reset_single_inputs(None)
+    elif load_example or not st.session_state.get("single_initialized"):
+        reset_single_inputs(example)
+    if example is not None:
+        st.caption(
+            "Prefilled demonstration measurements from training data; not an independent test"
+        )
+        st.caption(
+            "Load example restores the actual first training row, SHA-256 verified against the split manifest."
+        )
+    with st.form("single_form"):
+        model_id = st.selectbox(
+            "Prediction model",
+            list(MODEL_NAMES),
+            index=list(MODEL_NAMES).index("svm"),
+            format_func=MODEL_NAMES.get,
+            key="single_model_select",
+        )
+        record = {}
+        for tint, (section, features) in zip(SECTION_TINTS, FEATURE_GROUPS.items()):
+            st.markdown(
+                f'<div class="section-heading" style="background:{tint}">{section}</div>',
+                unsafe_allow_html=True,
+            )
+            if section == "04 / Steel & conveyer":
+                steel = st.selectbox(
+                    "Steel grade",
+                    ["A300", "A400"],
+                    index=None,
+                    key="single_steel",
+                    help="Source: TypeOfSteel_A300 and TypeOfSteel_A400. A300 → (1, 0); A400 → (0, 1).",
+                )
+                record["TypeOfSteel_A300"] = (
+                    None if steel is None else int(steel == "A300")
+                )
+                record["TypeOfSteel_A400"] = (
+                    None if steel is None else int(steel == "A400")
+                )
+            columns = st.columns(3)
+            for index, feature in enumerate(features):
+                observed = "Observed training range unavailable."
+                if training is not None:
+                    observed = f"Observed training range: {training[feature].min():g} to {training[feature].max():g} (advisory only)."
+                integer = feature in INTEGER_FEATURES
+                record[feature] = columns[index % 3].number_input(
+                    feature.replace("_", " "),
+                    value=None,
+                    step=1 if integer else 0.0001,
+                    format="%d" if integer else "%.5f",
+                    key=f"single_{feature}",
+                    help=f"Source: {feature}. Units: not documented in the source. {observed}",
+                )
+        submitted = st.form_submit_button(
+            "Predict defect category", key="single_predict", type="primary"
+        )
+    if submitted:
+        st.session_state.pop("single_result", None)
+        try:
+            features = validate_record(record, schema)
+            result = predict_record(model_id, features, resources["registry"])
+        except ValidationError as exc:
+            st.error(f"Measurements rejected: {exc}")
+        except ValueError:
+            st.error(
+                "Prediction failed. Verify the saved pipelines and experiment metadata, then resubmit."
+            )
+        else:
+            st.session_state["single_result"] = {
+                "result": result,
+                "inputs": features.iloc[0].to_dict(),
+                "run_id": resources["run_id"],
+            }
+    snapshot = st.session_state.get("single_result")
+    if snapshot is not None:
+        if training is not None:
+            outside = [
+                feature
+                for feature, value in snapshot["inputs"].items()
+                if value < training[feature].min() or value > training[feature].max()
+            ]
+            if outside:
+                st.warning(
+                    "Outside observed training ranges (advisory; values were not clamped): "
+                    + ", ".join(outside)
+                )
+        render_single_result(snapshot)
+
+
 # Application entry point: configure the page before creating any UI elements.
 def main() -> None:
     """Coordinate verified session resources, strict input validation, and UI tabs."""
@@ -632,7 +1016,7 @@ def main() -> None:
         "using 27 tabular measurements. Compare five saved classifiers and inspect your labeled batch. "
         "This is tabular defect classification, not image analysis.</p></div>"
         '<div class="category-strip">'
-        + "".join(f"<span>{label}</span>" for label in DISPLAY_LABELS.values())
+        + "".join(class_chip(label) for label in PALETTE)
         + "</div>",
         unsafe_allow_html=True,
     )
@@ -640,6 +1024,7 @@ def main() -> None:
         resources = session_resources()
     except Exception as exc:
         reset_upload_state()
+        st.session_state.pop("single_result", None)
         st.session_state.pop("resources", None)
         render_sidebar(None)
         detail = f" Contract check: {exc}" if isinstance(exc, ValueError) else ""
@@ -650,28 +1035,35 @@ def main() -> None:
         return
     schema = resources["schema"]
     uploaded, model_id = render_sidebar(schema)
-    batch = current_batch(uploaded, schema)
-    evaluate_tab, compare_tab, explore_tab = st.tabs(["Evaluate", "Compare", "Explore"])
-    if batch is None:
-        for tab, purpose in (
-            (evaluate_tab, "evaluate a saved classifier"),
-            (compare_tab, "compare all five models"),
-            (explore_tab, "explore class and feature distributions"),
-        ):
-            with tab:
-                st.info(f"Upload a valid labeled CSV in the sidebar to {purpose}.")
-        return
-    st.caption(
-        f"VALIDATED UPLOAD · {batch.row_count:,} records · {len(schema['features'])} features · "
-        f"{batch.target.nunique()}/7 categories · SHA-256 {batch.fingerprint[:12]} · "
-        f"Experiment {resources['run_id']}"
-    )
-    with evaluate_tab:
-        render_evaluate(batch, model_id, resources)
-    with compare_tab:
-        render_compare(batch, resources)
-    with explore_tab:
-        render_explore(batch, schema)
+    # The first tab opens by default: the labeled batch evaluation is the primary workflow.
+    batch_tab, single_tab = st.tabs(["Evaluate Batch", "Predict One"])
+    with single_tab:
+        render_predict_one(resources)
+    with batch_tab:
+        batch = current_batch(uploaded, schema)
+        evaluate_tab, compare_tab, explore_tab = st.tabs(
+            ["Evaluate", "Compare", "Explore"]
+        )
+        if batch is None:
+            for tab, purpose in (
+                (evaluate_tab, "evaluate a saved classifier"),
+                (compare_tab, "compare all five models"),
+                (explore_tab, "explore class and feature distributions"),
+            ):
+                with tab:
+                    st.info(f"Upload a valid labeled CSV in the sidebar to {purpose}.")
+        else:
+            st.caption(
+                f"VALIDATED UPLOAD · {batch.row_count:,} records · {len(schema['features'])} features · "
+                f"{batch.target.nunique()}/7 categories · SHA-256 {batch.fingerprint[:12]} · "
+                f"Experiment {resources['run_id']}"
+            )
+            with evaluate_tab:
+                render_evaluate(batch, model_id, resources)
+            with compare_tab:
+                render_compare(batch, resources)
+            with explore_tab:
+                render_explore(batch, schema)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,16 @@
 # Keep native upload controls, tables, and dropdowns aligned with the dashboard.
+# Pastel but professional: dark slate text on near-white, mint-tinted sidebar.
 [theme]
 base = "light"
-primaryColor = "#147d80"
-backgroundColor = "#f5f2e9"
-secondaryBackgroundColor = "#e9eee9"
-textColor = "#172b42"
+primaryColor = "#168578"
+backgroundColor = "#fafcfb"
+secondaryBackgroundColor = "#e9f3ef"
+textColor = "#293747"
 font = "sans serif"
+
+[theme.sidebar]
+backgroundColor = "#eef4fb"
+secondaryBackgroundColor = "#e1ecf7"
 
 # Uploaded labeled test data is bounded again by the application's validator.
 [server]
